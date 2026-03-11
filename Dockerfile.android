@@ -1,0 +1,44 @@
+# Android APK 构建环境
+FROM reactnativecommunity/react-native-android:latest
+
+WORKDIR /app
+
+# 复制项目文件
+COPY package*.json ./
+COPY index.js ./
+COPY app.json ./
+COPY tsconfig.json ./
+COPY babel.config.js ./
+COPY metro.config.js ./
+COPY react-native.config.js ./
+COPY App.tsx ./
+
+# 复制源代码
+COPY src ./src
+COPY android ./android
+
+# 安装依赖
+RUN npm ci
+
+# 生成签名密钥
+WORKDIR /app/android/app
+RUN keytool -genkeypair \
+    -v \
+    -storetype PKCS12 \
+    -keystore release.keystore \
+    -alias lenovo-wifi-manager \
+    -keyalg RSA \
+    -keysize 2048 \
+    -validity 10000 \
+    -storepass lenovo2024 \
+    -keypass lenovo2024 \
+    -dname "CN=Lenovo WiFi Manager, OU=Lenovo, O=Lenovo, L=Beijing, ST=Beijing, C=CN"
+
+# 构建 Release APK
+WORKDIR /app/android
+RUN ./gradlew clean assembleRelease
+
+# 输出目录
+VOLUME ["/app/android/app/build/outputs/apk/release"]
+
+CMD ["cp", "-r", "/app/android/app/build/outputs/apk/release", "/output"]
