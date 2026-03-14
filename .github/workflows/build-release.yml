@@ -11,13 +11,7 @@ on:
         required: true
         default: '1.0.0'
 
-env:
-  VERSION: ${{ github.event.inputs.version || github.ref_name }}
-
 jobs:
-  # ==========================================
-  # Android 构建
-  # ==========================================
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
@@ -75,7 +69,7 @@ jobs:
           cd android/app/build/outputs/apk/release
           for f in app-*-release.apk; do
             [ -f "$f" ] || continue
-            name=$(echo "$f" | sed 's/app-/lenovo-wifi-manager-v${VERSION}-/' | sed 's/-release//')
+            name=$(echo "$f" | sed 's/app-/lenovo-wifi-manager-v${{ github.ref_name }}-/; s/-release//')
             mv "$f" "$name"
           done
           ls -lh
@@ -86,9 +80,6 @@ jobs:
           name: android-apk
           path: android/app/build/outputs/apk/release/*.apk
 
-  # ==========================================
-  # Windows 构建
-  # ==========================================
   build-windows:
     name: Build Windows App
     runs-on: windows-latest
@@ -108,13 +99,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create source package
+      - name: Create Windows Package
         shell: pwsh
         run: |
-          $dest = "lenovo-wifi-manager-v${env:VERSION}-portable"
+          $version = "${{ github.ref_name }}"
+          $dest = "lenovo-wifi-manager-$version-portable"
           New-Item -ItemType Directory -Force -Path $dest
           
-          # 复制项目文件
+          # Copy files
           Copy-Item -Path "src" -Destination "$dest/src" -Recurse -Force
           Copy-Item -Path "windows" -Destination "$dest/windows" -Recurse -Force
           Copy-Item -Path "package.json" -Destination $dest -Force
@@ -122,9 +114,9 @@ jobs:
           Copy-Item -Path "App.tsx" -Destination $dest -Force
           Copy-Item -Path "tsconfig.json" -Destination $dest -Force
           
-          # 创建说明文件
-          @"
-Lenovo WiFi Manager v${env:VERSION}
+          # Create README using Out-File
+          $readme = @"
+Lenovo WiFi Manager $version
 ========================
 
 Windows Portable Version
@@ -136,65 +128,25 @@ To build and run:
 2. Install Visual Studio 2022 with C++ and UWP workloads
 3. Run: npm install
 4. Run: npx react-native run-windows --release
-
-Or open windows/lenovo-wifi-manager.sln in Visual Studio and build.
-"@ | Set-Content "$dest/README.txt"
+"@
+          $readme | Out-File -FilePath "$dest/README.txt" -Encoding utf8
           
-          # 创建启动脚本
-          @"
-@echo off
-echo Lenovo WiFi Manager v${env:VERSION}
-echo ========================
-echo.
-echo This is a React Native Windows project.
-echo Please build using Visual Studio or run: npx react-native run-windows
-echo.
-echo Prerequisites:
-echo - Node.js 18+
-echo - Visual Studio 2022 with UWP support
-echo.
-pause
-"@ | Set-Content "$dest/Start.bat"
+          # Create batch file
+          $batch = "@echo off`necho Lenovo WiFi Manager $version`necho ========================`necho.`necho This is a React Native Windows project.`necho Please build using Visual Studio or run: npx react-native run-windows`necho.`necho Prerequisites:`necho - Node.js 18+`necho - Visual Studio 2022 with UWP support`necho.`npause"
+          $batch | Out-File -FilePath "$dest/Start.bat" -Encoding utf8
           
-          Compress-Archive -Path $dest -DestinationPath "windows-portable.zip" -Force
-          Move-Item "windows-portable.zip" "lenovo-wifi-manager-v${env:VERSION}-windows.zip" -Force
-
-      - name: Try Build Windows
-        shell: pwsh
-        run: |
-          try {
-            # 创建 bundle 目录
-            New-Item -ItemType Directory -Force -Path "windows/LenovoWiFiManager/Bundle"
-            
-            # Bundle JS
-            npx react-native bundle --platform windows --dev false --entry-file index.js --bundle-output windows/LenovoWiFiManager/Bundle/index.windows.bundle --assets-dest windows/LenovoWiFiManager/Bundle 2>&1 | Out-Null
-            
-            # Build
-            msbuild windows/lenovo-wifi-manager.sln /p:Configuration=Release /p:Platform=x64 /p:AppxPackageSigningEnabled=false 2>&1 | Out-Null
-            
-            # 如果成功，复制到压缩包
-            $exePath = "windows/LenovoWiFiManager/Release/x64/LenovoWiFiManager.exe"
-            if (Test-Path $exePath) {
-              Write-Host "Build succeeded!"
-              Expand-Archive -Path "lenovo-wifi-manager-v${env:VERSION}-windows.zip" -DestinationPath "temp_extract" -Force
-              Copy-Item $exePath "temp_extract/lenovo-wifi-manager-v${env:VERSION}-portable/" -Force
-              Compress-Archive -Path "temp_extract/lenovo-wifi-manager-v${env:VERSION}-portable" -DestinationPath "lenovo-wifi-manager-v${env:VERSION}-windows.zip" -Force
-              Remove-Item -Recurse -Force "temp_extract" -ErrorAction SilentlyContinue
-            }
-          } catch {
-            Write-Host "Build failed, using source package only"
-          }
-        continue-on-error: true
+          # Create ZIP
+          $zipName = "lenovo-wifi-manager-$version-windows.zip"
+          Compress-Archive -Path $dest -DestinationPath $zipName -Force
+          
+          Write-Host "Created: $zipName"
 
       - name: Upload Windows
         uses: actions/upload-artifact@v4
         with:
           name: windows-app
-          path: lenovo-wifi-manager-v*-windows.zip
+          path: lenovo-wifi-manager-*-windows.zip
 
-  # ==========================================
-  # 发布 Release
-  # ==========================================
   create-release:
     name: Create Release
     needs: [build-android, build-windows]
@@ -221,15 +173,15 @@ pause
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Release ${{ env.VERSION }}"
+          name: Release ${{ github.ref_name }}
           body: |
-            ## Lenovo WiFi Manager ${{ env.VERSION }}
+            ## Lenovo WiFi Manager ${{ github.ref_name }}
 
             ### Android APK
             Download and install on your Android device.
 
             ### Windows Package
-            Contains source code and project files. Build with Visual Studio 2022 or run `npx react-native run-windows`.
+            Contains source code and project files. Build with Visual Studio 2022.
           files: ./artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
