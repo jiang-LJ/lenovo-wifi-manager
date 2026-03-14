@@ -5,183 +5,73 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: '版本号 (如: 1.0.0)'
-        required: true
-        default: '1.0.0'
 
 jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept licenses
-        run: yes | sdkmanager --licenses || true
-
-      - name: Install SDK components
-        run: |
-          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.0" || true
-
-      - name: Create assets directory
-        run: mkdir -p android/app/src/main/assets
-
-      - name: Generate Keystore
-        run: |
+      - run: npm ci
+      - uses: android-actions/setup-android@v3
+      - run: |
+          mkdir -p android/app/src/main/assets
           cd android/app
-          keytool -genkeypair -v -storetype PKCS12 \
-            -keystore release.keystore \
-            -alias lenovo-wifi-manager \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass lenovo2024 -keypass lenovo2024 \
-            -dname "CN=Lenovo, O=Lenovo, L=Beijing, ST=Beijing, C=CN"
-
-      - name: Build with Gradle
-        uses: gradle/gradle-build-action@v2
+          keytool -genkeypair -v -storetype PKCS12 -keystore release.keystore -alias lenovo -keyalg RSA -keysize 2048 -validity 10000 -storepass lenovo2024 -keypass lenovo2024 -dname "CN=Lenovo"
+      - uses: gradle/gradle-build-action@v2
         with:
           gradle-version: 8.0.1
           arguments: assembleRelease
           build-root-directory: android
-
-      - name: Rename APK
-        run: |
+      - run: |
           cd android/app/build/outputs/apk/release
-          for f in app-*-release.apk; do
-            [ -f "$f" ] || continue
-            name=$(echo "$f" | sed 's/app-/lenovo-wifi-manager-v${{ github.ref_name }}-/; s/-release//')
-            mv "$f" "$name"
-          done
-          ls -lh
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          for f in app-*.apk; do mv "$f" "lenovo-wifi-manager-${{ github.ref_name }}.apk" 2>/dev/null || true; done
+      - uses: actions/upload-artifact@v4
         with:
           name: android-apk
           path: android/app/build/outputs/apk/release/*.apk
 
   build-windows:
-    name: Build Windows App
+    name: Build Windows
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Create Windows Package
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}"
-          $dest = "lenovo-wifi-manager-$version-portable"
-          New-Item -ItemType Directory -Force -Path $dest
-          
-          # Copy files
-          Copy-Item -Path "src" -Destination "$dest/src" -Recurse -Force
-          Copy-Item -Path "windows" -Destination "$dest/windows" -Recurse -Force
-          Copy-Item -Path "package.json" -Destination $dest -Force
-          Copy-Item -Path "index.js" -Destination $dest -Force
-          Copy-Item -Path "App.tsx" -Destination $dest -Force
-          Copy-Item -Path "tsconfig.json" -Destination $dest -Force
-          
-          # Create README using Out-File
-          $readme = @"
-Lenovo WiFi Manager $version
-========================
-
-Windows Portable Version
-
-This package contains the source code and Windows project files.
-
-To build and run:
-1. Install Node.js 18+
-2. Install Visual Studio 2022 with C++ and UWP workloads
-3. Run: npm install
-4. Run: npx react-native run-windows --release
-"@
-          $readme | Out-File -FilePath "$dest/README.txt" -Encoding utf8
-          
-          # Create batch file
-          $batch = "@echo off`necho Lenovo WiFi Manager $version`necho ========================`necho.`necho This is a React Native Windows project.`necho Please build using Visual Studio or run: npx react-native run-windows`necho.`necho Prerequisites:`necho - Node.js 18+`necho - Visual Studio 2022 with UWP support`necho.`npause"
-          $batch | Out-File -FilePath "$dest/Start.bat" -Encoding utf8
-          
-          # Create ZIP
-          $zipName = "lenovo-wifi-manager-$version-windows.zip"
-          Compress-Archive -Path $dest -DestinationPath $zipName -Force
-          
-          Write-Host "Created: $zipName"
-
-      - name: Upload Windows
-        uses: actions/upload-artifact@v4
+      - run: npm ci
+      - run: npm run lint || true
+      - run: |
+          7z a windows-source.zip src windows package.json index.js App.tsx tsconfig.json
+      - uses: actions/upload-artifact@v4
         with:
-          name: windows-app
-          path: lenovo-wifi-manager-*-windows.zip
+          name: windows-source
+          path: windows-source.zip
 
-  create-release:
+  release:
     name: Create Release
     needs: [build-android, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download Android
-        uses: actions/download-artifact@v4
-        with:
-          name: android-apk
-          path: ./artifacts/
-
-      - name: Download Windows
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-app
-          path: ./artifacts/
-
-      - name: List files
-        run: ls -lhR ./artifacts/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - uses: actions/download-artifact@v4
+      - run: ls -R
+      - uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          body: |
-            ## Lenovo WiFi Manager ${{ github.ref_name }}
-
-            ### Android APK
-            Download and install on your Android device.
-
-            ### Windows Package
-            Contains source code and project files. Build with Visual Studio 2022.
-          files: ./artifacts/**/*
+          files: |
+            android-apk/*.apk
+            windows-source/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
