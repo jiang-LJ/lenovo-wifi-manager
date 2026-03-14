@@ -175,27 +175,12 @@ jobs:
             Copy-Item "$releasePath/*" -Destination $destPath -Recurse -Force
             
             # 创建启动脚本
-            @"
-@echo off
-echo Starting Lenovo WiFi Manager...
-start LenovoWiFiManager.exe
-"@ | Set-Content -Path "$destPath/Start.bat"
+            $startScript = "@echo off`necho Starting Lenovo WiFi Manager...`nstart LenovoWiFiManager.exe"
+            Set-Content -Path "$destPath/Start.bat" -Value $startScript
             
             # 创建 README
-            @"
-Lenovo WiFi Manager v${env:VERSION}
-========================
-
-Portable Version
-
-Usage:
-1. Run Start.bat to launch the application
-2. Or run LenovoWiFiManager.exe directly
-
-Requirements:
-- Windows 10 version 1903+ or Windows 11
-- Visual C++ Redistributables (usually pre-installed)
-"@ | Set-Content -Path "$destPath/README.txt"
+            $readmeContent = "Lenovo WiFi Manager v${env:VERSION}`n========================`n`nPortable Version`n`nUsage:`n1. Run Start.bat to launch the application`n2. Or run LenovoWiFiManager.exe directly`n`nRequirements:`n- Windows 10 version 1903+ or Windows 11`n- Visual C++ Redistributables (usually pre-installed)"
+            Set-Content -Path "$destPath/README.txt" -Value $readmeContent
             
             # 压缩为 ZIP
             Compress-Archive -Path $destPath -DestinationPath "lenovo-wifi-manager-v${env:VERSION}-portable.zip" -Force
